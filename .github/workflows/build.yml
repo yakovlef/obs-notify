@@ -1,0 +1,117 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Read project version
+        id: project
+        shell: pwsh
+        run: |
+          $spec = Get-Content buildspec.json -Raw | ConvertFrom-Json
+          "version=$($spec.version)" >> $env:GITHUB_OUTPUT
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+            if ($tagVersion -ne $spec.version) {
+              throw "Tag version $tagVersion does not match buildspec.json version $($spec.version)."
+            }
+          }
+
+      - name: Restore OBS dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: windows-x64-obs-deps-${{ hashFiles('buildspec.json') }}
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        shell: pwsh
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Install Inno Setup
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress --yes
+          }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $installer = "${{ startsWith(github.ref, 'refs/tags/v') }}" -eq "true"
+          if ($installer) {
+            .\scripts\package-windows.ps1 -Version "${{ steps.project.outputs.version }}" -BuildInstaller
+          } else {
+            .\scripts\package-windows.ps1 -Version "${{ steps.project.outputs.version }}"
+          }
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-notify-${{ steps.project.outputs.version }}-windows-x64
+          path: |
+            release/*.zip
+            release/*.exe
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mapfile -t files < <(find release -maxdepth 1 -type f -print)
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Stream Notify $GITHUB_REF_NAME" \
+            --generate-notes

@@ -1,0 +1,48 @@
+# Local builds, packages, tools, and downloaded dependencies
+/build*/
+/out/
+/release/
+/.tools/
+/.deps/
+/_deps/
+
+# CMake generated files and user-specific presets
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/CTestTestfile.cmake
+/Testing/
+/compile_commands.json
+/CMakeUserPresets.json
+/cmake/.CMakeBuildNumber
+
+# Visual Studio and editor state
+/.vs/
+/.vscode/
+/.idea/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+
+# Compiled and packaged artifacts
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+*.zip
+*.7z
+
+# Logs, temporary files, and operating-system metadata
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local source material used during development
+NoteGPT_Transcript_*.txt
